@@ -375,11 +375,19 @@ let pagarDocs = [], receberDocs = [], vendasDocs = [];
    Este painel lê e grava direto numa Planilha Google compartilhada, através
    da API do SheetDB (https://sheetdb.io). O SheetDB já lida com CORS
    automaticamente, então não precisa de nenhum Apps Script. */
-const SHEETDB_URL = "https://sheetdb.io/api/v1/bn2a3fob1bw09";
+const SHEETDB_URL = "https://sheetdb.io/api/v1/xd1aiwrwkjyhg";
 const SHEET_MAP = { pagar: "Pagar", receber: "Receber", vendas: "Vendas" };
 let sheetsOK = false;
 
 function newId(){ return 'id' + Date.now() + Math.random().toString(16).slice(2); }
+
+function parseValorBR(v){
+  if (typeof v === 'number') return v;
+  if (v === undefined || v === null || v === '') return 0;
+  const s = String(v).replace(/[R$\s]/g, '').replace(/\./g, '').replace(',', '.');
+  const n = parseFloat(s);
+  return isNaN(n) ? 0 : n;
+}
 
 async function sheetsList(name){
   const url = `${SHEETDB_URL}?sheet=${SHEET_MAP[name]}`;
@@ -387,7 +395,7 @@ async function sheetsList(name){
   if(!res.ok) throw new Error('Falha ao carregar ' + name + ' (HTTP ' + res.status + ')');
   const rows = await res.json();
   if(rows && rows.error) throw new Error(rows.error);
-  return rows.map(r => ({ ...r, valor: parseFloat(r.valor) || 0 }));
+  return rows.filter(r => MESES.includes(r.mes)).map(r => ({ ...r, valor: parseValorBR(r.valor) }));
 }
 async function sheetsAdd(name, entry){
   const res = await fetch(`${SHEETDB_URL}?sheet=${SHEET_MAP[name]}`, {
