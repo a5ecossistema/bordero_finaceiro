@@ -381,10 +381,17 @@ let sheetsOK = false;
 
 function newId(){ return 'id' + Date.now() + Math.random().toString(16).slice(2); }
 
-function parseValorBR(v){
-  if (typeof v === 'number') return v;
-  if (v === undefined || v === null || v === '') return 0;
-  const s = String(v).replace(/[R$\s]/g, '').replace(/\./g, '').replace(',', '.');
+/* Converte valor vindo da planilha para número, aceitando também
+   formatos como "R$ 1.000,00" ou "1.000,00" (rede de segurança). */
+function parseMoney(v){
+  if(typeof v === 'number') return v;
+  if(v == null) return 0;
+  let s = String(v).trim();
+  if(!s || s === '—' || s === '-') return 0;
+  s = s.replace(/[R$\s]/g, '');           // tira "R$" e espaços
+  if(s.includes(',')){                      // formato BR: 1.000,00
+    s = s.replace(/\./g, '').replace(',', '.');
+  }
   const n = parseFloat(s);
   return isNaN(n) ? 0 : n;
 }
@@ -395,7 +402,7 @@ async function sheetsList(name){
   if(!res.ok) throw new Error('Falha ao carregar ' + name + ' (HTTP ' + res.status + ')');
   const rows = await res.json();
   if(rows && rows.error) throw new Error(rows.error);
-  return rows.filter(r => MESES.includes(r.mes)).map(r => ({ ...r, valor: parseValorBR(r.valor) }));
+  return rows.map(r => ({ ...r, valor: parseMoney(r.valor) }));
 }
 async function sheetsAdd(name, entry){
   const res = await fetch(`${SHEETDB_URL}?sheet=${SHEET_MAP[name]}`, {
