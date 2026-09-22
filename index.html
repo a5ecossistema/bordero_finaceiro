@@ -396,13 +396,49 @@ function parseMoney(v){
   return isNaN(n) ? 0 : n;
 }
 
+/* --- Normalização tolerante do que vem da planilha --- */
+function stripAccents(s){ return String(s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,''); }
+function normKey(s){ return stripAccents(s).trim().toLowerCase(); }
+
+/* Aceita "Setembro", "setembro", "SETEMBRO ", "Set", "Setembro/2026", "09", "9" -> "Setembro" */
+function canonMes(v){
+  const s = normKey(v);
+  if(!s) return v;
+  const abbr = { jan:'Janeiro', fev:'Fevereiro', mar:'Março', abr:'Abril', mai:'Maio', jun:'Junho',
+                 jul:'Julho', ago:'Agosto', set:'Setembro', out:'Outubro', nov:'Novembro', dez:'Dezembro' };
+  const p3 = s.slice(0,3);
+  if(abbr[p3]) return abbr[p3];
+  const n = parseInt(s,10);
+  if(!isNaN(n) && n>=1 && n<=12) return MESES[n-1];
+  return v;
+}
+
+/* Aceita status com caixa/acento/espaço diferentes -> valor canônico da lista */
+function canonStatus(v, options){
+  const s = normKey(v);
+  for(const o of options){ if(normKey(o)===s) return o; }
+  return v;
+}
+const STATUS_OPTS = {
+  pagar:   ["Pago","Pendente","Atrasado"],
+  receber: ["Pago","Pendente","Atrasado"],
+  vendas:  ["Fechada","Em negociação","Perdida"]
+};
+
 async function sheetsList(name){
   const url = `${SHEETDB_URL}?sheet=${SHEET_MAP[name]}`;
   const res = await fetch(url);
   if(!res.ok) throw new Error('Falha ao carregar ' + name + ' (HTTP ' + res.status + ')');
   const rows = await res.json();
   if(rows && rows.error) throw new Error(rows.error);
-  return rows.map(r => ({ ...r, valor: parseMoney(r.valor) }));
+  const opts = STATUS_OPTS[name] || [];
+  return rows
+    .filter(r => Object.values(r).some(v => String(v).trim() !== ''))  // descarta linhas totalmente vazias
+    .map(r => ({ ...r,
+      mes: canonMes(r.mes),
+      status: canonStatus(r.status, opts),
+      valor: parseMoney(r.valor)
+    }));
 }
 async function sheetsAdd(name, entry){
   const res = await fetch(`${SHEETDB_URL}?sheet=${SHEET_MAP[name]}`, {
@@ -464,6 +500,16 @@ async function loadAll(){
     ]);
     sheetsOK = true;
     dot.className='conn-dot on'; label.textContent='Conectado à planilha';
+    // Se o mês selecionado não tiver nenhum dado, pula pro mês mais recente que tiver.
+    const mesesComDados = new Set([...pagarDocs, ...receberDocs, ...vendasDocs].map(x => x.mes));
+    if(!mesesComDados.has(mesAtual)){
+      const presentes = MESES.filter(m => mesesComDados.has(m));
+      if(presentes.length){
+        mesAtual = presentes[presentes.length - 1];
+        const sel = document.getElementById('mes-select');
+        if(sel) sel.value = mesAtual;
+      }
+    }
   }catch(e){
     sheetsOK = false;
     pagarDocs = []; receberDocs = []; vendasDocs = [];
