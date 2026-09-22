@@ -7,7 +7,9 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,500;0,9..144,600;1,9..144,500&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.4/chart.umd.min.js"></script>
+<!-- Chart.js servido pelo próprio projeto: o cdnjs nunca publicou a 4.4.4 e o
+     <script> do CDN dava 404 em silêncio, deixando todos os gráficos em branco. -->
+<script src="chart.umd.min.js"></script>
 <style>
   :root{
     --ink:#141A2E;
@@ -27,9 +29,6 @@
     --bad-soft:#F8E4E1;
     --font-display:'Fraunces', Georgia, 'Times New Roman', serif;
     --font-body:'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-  }
-  :root:not([data-theme="light"]){
-    --paper:#F6F5F1; --panel:#FFFFFF; --line:#E4E1D8; --text:#1B1F27; --text-soft:#5B6270;
   }
   @media (prefers-color-scheme: dark){
     :root:not([data-theme="light"]){
@@ -112,6 +111,9 @@
   .panel h3{ font-family:var(--font-display); font-weight:500; font-size:16.5px; margin:0 0 14px 0; }
   .chart-wrap{ position:relative; height:260px; }
   .chart-wrap.small{ height:220px; }
+  .chart-erro{ position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+    text-align:center; padding:16px; font-size:12.5px; line-height:1.5; color:var(--bad);
+    background:var(--bad-soft); border-radius:8px; }
 
   table{ width:100%; border-collapse:collapse; font-size:13.5px; }
   th{ text-align:left; font-weight:600; color:var(--text-soft); font-size:11.5px; padding:8px 10px; border-bottom:1px solid var(--line); white-space:nowrap; }
@@ -139,11 +141,15 @@
   .add-form select, .add-form input{ width:100%; }
   .add-form .actions{ grid-column:1 / -1; display:flex; gap:8px; justify-content:flex-end; }
 
-  .client-grid{ display:grid; grid-template-columns:repeat(auto-fill, minmax(230px,1fr)); gap:12px; }
+  .client-grid{ display:grid; grid-template-columns:repeat(auto-fill, minmax(250px,1fr)); gap:12px; }
   .client-card{ border:1px solid var(--line); border-radius:10px; padding:14px 16px; background:var(--panel); }
-  .client-card .name{ font-weight:600; font-size:14.5px; margin-bottom:6px; }
+  .client-card.atrasado{ border-left:4px solid var(--bad); }
+  .client-card.aberto{ border-left:4px solid var(--warn); }
+  .client-card.emdia{ border-left:4px solid var(--good); }
+  .client-card .name{ font-weight:600; font-size:14.5px; margin-bottom:8px; }
   .client-card .row{ display:flex; justify-content:space-between; font-size:13px; color:var(--text-soft); margin-top:4px; }
   .client-card .row span:last-child{ color:var(--text); font-variant-numeric:tabular-nums; }
+  .client-card .tag{ display:inline-block; margin-top:10px; font-size:11px; padding:3px 8px; border-radius:20px; background:var(--gold-soft); color:var(--text); }
 
   .empty-state{ border:1px dashed var(--line); border-radius:10px; padding:40px 24px; text-align:center; color:var(--text-soft); }
   .empty-state .big{ font-family:var(--font-display); font-size:19px; color:var(--text); margin-bottom:6px; }
@@ -178,7 +184,7 @@
   </nav>
   <div class="sidebar-foot">
     <span><span class="conn-dot" id="conn-dot"></span><span id="conn-label">Conectando…</span></span><br>
-    Borderô financeiro · <strong>build v7 (aba única)</strong>
+    Borderô financeiro · <strong>build v9 (gráficos locais)</strong>
   </div>
 </aside>
 
@@ -194,7 +200,7 @@
   </div>
 
   <div id="banner">
-    <div class="notice show" id="notice-readonly">Os dados deste painel ficam salvos apenas neste navegador (localStorage). Abrir em outro computador ou navegador começa com os dados de exemplo.</div>
+    <div class="notice" id="notice-readonly"></div>
   </div>
 
   <!-- VISÃO GERAL -->
@@ -320,6 +326,11 @@
 
   <!-- CLIENTES -->
   <section class="view" id="view-clientes">
+    <div class="kpi-row" style="grid-template-columns:repeat(3,1fr);">
+      <div class="kpi neutral"><div class="label">Clientes na base</div><div class="value" id="kpi-cli-qtd">0</div></div>
+      <div class="kpi good"><div class="label">Total vendido (fechadas)</div><div class="value" id="kpi-cli-vendido">—</div></div>
+      <div class="kpi bad"><div class="label">Total em aberto</div><div class="value" id="kpi-cli-aberto">—</div></div>
+    </div>
     <div class="client-grid" id="client-grid"></div>
   </section>
 
@@ -371,36 +382,35 @@ const CATEGORIAS_PAGAR = ["Aluguel","Energia Elétrica","Água e Esgoto","Intern
 let mesAtual = "Setembro";
 let pagarDocs = [], receberDocs = [], vendasDocs = [];
 
-/* ---------- Conexão com a Planilha do Google (via SheetDB) ----------
-   Este painel lê e grava direto numa Planilha Google compartilhada, através
-   da API do SheetDB (https://sheetdb.io). O SheetDB já lida com CORS
-   automaticamente, então não precisa de nenhum Apps Script. */
+/* ---------- Conexão com a Planilha do Google (via SheetDB) ---------- */
 const SHEETDB_URL = "https://sheetdb.io/api/v1/xd1aiwrwkjyhg";
-const SHEET_MAP = { pagar: "Pagar", receber: "Receber", vendas: "Vendas" };
 let sheetsOK = false;
 
 function newId(){ return 'id' + Date.now() + Math.random().toString(16).slice(2); }
 
-/* Converte valor vindo da planilha para número, aceitando também
-   formatos como "R$ 1.000,00" ou "1.000,00" (rede de segurança). */
+/* Escapa texto que vem da planilha antes de entrar no HTML. */
+function esc(v){
+  return String(v == null ? '' : v)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
 function parseMoney(v){
   if(typeof v === 'number') return v;
   if(v == null) return 0;
   let s = String(v).trim();
   if(!s || s === '—' || s === '-') return 0;
-  s = s.replace(/[R$\s]/g, '');           // tira "R$" e espaços
-  if(s.includes(',')){                      // formato BR: 1.000,00
+  s = s.replace(/[R$\s]/g, '');
+  if(s.includes(',')){
     s = s.replace(/\./g, '').replace(',', '.');
   }
   const n = parseFloat(s);
   return isNaN(n) ? 0 : n;
 }
 
-/* --- Normalização tolerante do que vem da planilha --- */
 function stripAccents(s){ return String(s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,''); }
 function normKey(s){ return stripAccents(s).trim().toLowerCase(); }
 
-/* Aceita "Setembro", "setembro", "SETEMBRO ", "Set", "Setembro/2026", "09", "9" -> "Setembro" */
 function canonMes(v){
   const s = normKey(v);
   if(!s) return v;
@@ -413,7 +423,6 @@ function canonMes(v){
   return v;
 }
 
-/* Aceita status com caixa/acento/espaço diferentes -> valor canônico da lista */
 function canonStatus(v, options){
   const s = normKey(v);
   for(const o of options){ if(normKey(o)===s) return o; }
@@ -427,7 +436,7 @@ const STATUS_OPTS = {
 
 /* Aba ÚNICA: lê tudo de uma vez e separa por coluna "tipo" (pagar/receber/vendas). */
 async function sheetsListAll(){
-  const res = await fetch(SHEETDB_URL);   // sem ?sheet= -> aba padrão (a única)
+  const res = await fetch(SHEETDB_URL);
   if(!res.ok) throw new Error('Falha ao carregar dados (HTTP ' + res.status + ')');
   const rows = await res.json();
   if(rows && rows.error) throw new Error(rows.error);
@@ -497,6 +506,7 @@ async function removeDocLocal(name, id){
 async function loadAll(){
   const label = document.getElementById('conn-label');
   const dot = document.getElementById('conn-dot');
+  const notice = document.getElementById('notice-readonly');
   try{
     const todos = await sheetsListAll();
     pagarDocs   = splitByTipo(todos, 'pagar');
@@ -504,7 +514,7 @@ async function loadAll(){
     vendasDocs  = splitByTipo(todos, 'vendas');
     sheetsOK = true;
     dot.className='conn-dot on'; label.textContent='Conectado à planilha';
-    // Se o mês selecionado não tiver nenhum dado, pula pro mês mais recente que tiver.
+    notice.classList.remove('show');
     const mesesComDados = new Set([...pagarDocs, ...receberDocs, ...vendasDocs].map(x => x.mes));
     if(!mesesComDados.has(mesAtual)){
       const presentes = MESES.filter(m => mesesComDados.has(m));
@@ -518,8 +528,8 @@ async function loadAll(){
     sheetsOK = false;
     pagarDocs = []; receberDocs = []; vendasDocs = [];
     dot.className='conn-dot off'; label.textContent='Sem conexão com a planilha';
-    document.getElementById('notice-readonly').textContent = 'Não foi possível conectar à Planilha Google via SheetDB (' + e.message + '). Confira se a planilha conectada tem a coluna "tipo" (pagar/receber/vendas).';
-    document.getElementById('notice-readonly').classList.add('show');
+    notice.textContent = 'Não foi possível conectar à Planilha Google via SheetDB (' + e.message + '). Confira se a planilha conectada tem a coluna "tipo" (pagar/receber/vendas).';
+    notice.classList.add('show');
   }
 }
 
@@ -553,7 +563,7 @@ document.querySelectorAll('.nav-item').forEach(btn=>{
       pagar:["Contas a pagar","Lançamentos e status por categoria"],
       receber:["Contas a receber","Clientes e projetos em aberto"],
       vendas:["Vendas","Receita gerada pela operação comercial"],
-      clientes:["Clientes","Situação de cada cliente em Contas a Receber"],
+      clientes:["Clientes","Consolidado de todos os meses — vendas e contas a receber"],
       planilha:["Lançamento em lote","Preencha como planilha e salve tudo de uma vez"]
     };
     document.getElementById('page-title').textContent = titles[target][0];
@@ -632,22 +642,71 @@ window.updateStatus = updateStatus;
 window.removeDoc = removeDoc;
 
 function statusSelect(collection, id, current, options){
-  const opts = options.map(o=>`<option value="${o}" ${o===current?'selected':''}>${o}</option>`).join('');
-  return `<select class="status-select ${current}" onchange="updateStatus('${collection}','${id}',this.value); this.className='status-select '+this.value;">${opts}</select>`;
+  const opts = options.map(o=>`<option value="${esc(o)}" ${o===current?'selected':''}>${esc(o)}</option>`).join('');
+  return `<select class="status-select ${esc(current)}" data-col="${esc(collection)}" data-id="${esc(id)}"
+    onchange="updateStatus(this.dataset.col, this.dataset.id, this.value); this.className='status-select '+this.value;">${opts}</select>`;
+}
+function deleteBtn(collection, id){
+  return `<button class="icon-btn" data-col="${esc(collection)}" data-id="${esc(id)}"
+    onclick="removeDoc(this.dataset.col, this.dataset.id)">✕</button>`;
 }
 
 /* ---------- charts ---------- */
 let charts = {};
+function chartFallback(el, msg){
+  const wrap = el.closest('.chart-wrap') || el.parentElement;
+  if(!wrap || wrap.querySelector('.chart-erro')) return;
+  const div = document.createElement('div');
+  div.className = 'chart-erro';
+  div.textContent = msg;
+  wrap.appendChild(div);
+}
 function upsertChart(id, config){
+  const el = document.getElementById(id);
+  if(!el) return;
+  if(typeof Chart === 'undefined'){
+    // nunca mais falhar em silêncio: sem a biblioteca, o painel avisa na tela
+    chartFallback(el, 'Biblioteca de gráficos não carregou (chart.umd.min.js). Recarregue a página; se persistir, o arquivo não subiu junto com o index.html.');
+    return;
+  }
   try{
-    const el = document.getElementById(id);
-    if(!el) return;                                  // canvas não existe: ignora
-    if(typeof Chart === 'undefined') return;         // biblioteca não carregou: ignora
     if(charts[id]) charts[id].destroy();
     charts[id] = new Chart(el, config);
   }catch(e){
     console.error('Falha ao desenhar o gráfico "' + id + '":', e);
+    chartFallback(el, 'Não foi possível desenhar este gráfico: ' + e.message);
   }
+}
+
+/* ---------- Clientes: consolida VENDAS + CONTAS A RECEBER ----------
+   Toda venda lançada faz o cliente aparecer aqui na hora, mesmo que ainda
+   não exista nenhuma conta a receber cadastrada para ele. O agrupamento é
+   por nome normalizado (sem acento, sem caixa, sem espaço extra), então
+   "Cliente X" e "cliente  x" caem no mesmo card. */
+function buildClientes(receberAll, vendasAll){
+  const map = {};
+  function slot(nome){
+    const k = normKey(nome).replace(/\s+/g,' ');
+    if(!k) return null;
+    if(!map[k]) map[k] = { nome:String(nome).trim(), vendido:0, qtdVendas:0, negociando:0,
+                           aberto:0, recebido:0, atrasado:false, temReceber:false };
+    return map[k];
+  }
+  vendasAll.forEach(v=>{
+    const c = slot(v.cliente); if(!c) return;
+    if(v.status === 'Fechada'){ c.vendido += v.valor; c.qtdVendas++; }
+    else if(v.status === 'Em negociação'){ c.negociando += v.valor; }
+  });
+  receberAll.forEach(r=>{
+    const c = slot(r.cliente); if(!c) return;
+    c.temReceber = true;
+    if(r.status === 'Pago'){ c.recebido += r.valor; }
+    else {
+      c.aberto += r.valor;
+      if(r.status === 'Atrasado') c.atrasado = true;
+    }
+  });
+  return Object.values(map).sort((a,b)=> (b.aberto - a.aberto) || (b.vendido - a.vendido));
 }
 
 /* ---------- render ---------- */
@@ -708,11 +767,11 @@ function renderAll(){
 
   const tbodyP = document.querySelector('#tabela-pagar tbody');
   tbodyP.innerHTML = pagar.length ? pagar.map(x=>`<tr>
-      <td>${x.categoria}</td><td>${x.item}</td><td>${x.resp}</td><td>${x.venc}</td>
+      <td>${esc(x.categoria)}</td><td>${esc(x.item)}</td><td>${esc(x.resp)}</td><td>${esc(x.venc)}</td>
       <td class="num">${fmt(x.valor)}</td>
       <td>${statusSelect('pagar', x.id, x.status, ["Pendente","Pago","Atrasado"])}</td>
-      <td><button class="icon-btn" onclick="removeDoc('pagar','${x.id}')">✕</button></td>
-    </tr>`).join('') : `<tr><td colspan="7" style="color:var(--text-soft);">Nenhum lançamento para ${mesAtual}.</td></tr>`;
+      <td>${deleteBtn('pagar', x.id)}</td>
+    </tr>`).join('') : `<tr><td colspan="7" style="color:var(--text-soft);">Nenhum lançamento para ${esc(mesAtual)}.</td></tr>`;
 
   const statusRecebCounts = ["Pago","Pendente","Atrasado"].map(s=>sum(receber.filter(x=>x.status===s),x=>x.valor));
   upsertChart('chart-status-receber', { type:'doughnut',
@@ -726,14 +785,15 @@ function renderAll(){
 
   const tbodyR = document.querySelector('#tabela-receber tbody');
   tbodyR.innerHTML = receber.length ? receber.map(x=>`<tr>
-      <td>${x.cliente}</td><td>${x.venc}</td><td class="num">${x.valor?fmt(x.valor):'—'}</td>
+      <td>${esc(x.cliente)}</td><td>${esc(x.venc)}</td><td class="num">${x.valor?fmt(x.valor):'—'}</td>
       <td>${statusSelect('receber', x.id, x.status, ["Pendente","Pago","Atrasado"])}</td>
-      <td style="color:var(--text-soft);">${x.obs||''}</td>
-      <td><button class="icon-btn" onclick="removeDoc('receber','${x.id}')">✕</button></td>
-    </tr>`).join('') : `<tr><td colspan="6" style="color:var(--text-soft);">Nenhum lançamento para ${mesAtual}.</td></tr>`;
+      <td style="color:var(--text-soft);">${esc(x.obs||'')}</td>
+      <td>${deleteBtn('receber', x.id)}</td>
+    </tr>`).join('') : `<tr><td colspan="6" style="color:var(--text-soft);">Nenhum lançamento para ${esc(mesAtual)}.</td></tr>`;
 
-  document.getElementById('kpi-vendas-qtd').textContent = vendas.filter(x=>x.status==="Fechada").length;
-  document.getElementById('kpi-ticket').textContent = vendas.filter(x=>x.status==="Fechada").length ? fmt(totalReceita/vendas.filter(x=>x.status==="Fechada").length) : '—';
+  const fechadas = vendas.filter(x=>x.status==="Fechada");
+  document.getElementById('kpi-vendas-qtd').textContent = fechadas.length;
+  document.getElementById('kpi-ticket').textContent = fechadas.length ? fmt(totalReceita/fechadas.length) : '—';
   document.getElementById('vendas-empty').style.display = vendas.length ? 'none' : 'block';
   upsertChart('chart-vendas-mes', { type:'bar',
     data:{ labels:MESES.map(m=>m.slice(0,3)), datasets:[{ data:evoVendas, backgroundColor:'#141A2E' }] },
@@ -741,24 +801,34 @@ function renderAll(){
 
   const tbodyV = document.querySelector('#tabela-vendas tbody');
   tbodyV.innerHTML = vendas.map(x=>`<tr>
-      <td>${x.cliente}</td><td>${x.produto}</td><td>${x.data}</td><td class="num">${fmt(x.valor)}</td>
+      <td>${esc(x.cliente)}</td><td>${esc(x.produto)}</td><td>${esc(x.data)}</td><td class="num">${fmt(x.valor)}</td>
       <td>${statusSelect('vendas', x.id, x.status, ["Fechada","Em negociação","Perdida"])}</td>
-      <td><button class="icon-btn" onclick="removeDoc('vendas','${x.id}')">✕</button></td>
+      <td>${deleteBtn('vendas', x.id)}</td>
     </tr>`).join('');
 
+  /* ----- Clientes (vendas + contas a receber) ----- */
+  const clientes = buildClientes(receberAll, vendasAll);
+  document.getElementById('kpi-cli-qtd').textContent = clientes.length;
+  document.getElementById('kpi-cli-vendido').textContent = fmt(sum(clientes, c=>c.vendido));
+  document.getElementById('kpi-cli-aberto').textContent = fmt(sum(clientes, c=>c.aberto));
+
   const grid = document.getElementById('client-grid');
-  const byClient = {};
-  receberAll.forEach(x=>{
-    if(!byClient[x.cliente]) byClient[x.cliente] = {valor:0, status:x.status};
-    byClient[x.cliente].valor += x.valor;
-    if(x.status === "Atrasado") byClient[x.cliente].status = "Atrasado";
-  });
-  grid.innerHTML = Object.entries(byClient).map(([nome, d])=>`
-    <div class="client-card">
-      <div class="name">${nome}</div>
-      <div class="row"><span>Em aberto</span><span>${d.valor?fmt(d.valor):'—'}</span></div>
-      <div class="row"><span>Status</span><span>${d.status}</span></div>
-    </div>`).join('') || `<div style="color:var(--text-soft);">Nenhum cliente lançado ainda.</div>`;
+  grid.innerHTML = clientes.map(c=>{
+    const situacao = c.atrasado ? 'Atrasado' : (c.aberto > 0 ? 'Pendente' : 'Em dia');
+    const cls = c.atrasado ? 'atrasado' : (c.aberto > 0 ? 'aberto' : 'emdia');
+    const tag = !c.temReceber && c.qtdVendas
+      ? '<div class="tag">Veio de venda — sem conta a receber lançada</div>' : '';
+    return `
+    <div class="client-card ${cls}">
+      <div class="name">${esc(c.nome)}</div>
+      <div class="row"><span>Vendas fechadas</span><span>${c.qtdVendas} · ${fmt(c.vendido)}</span></div>
+      ${c.negociando ? `<div class="row"><span>Em negociação</span><span>${fmt(c.negociando)}</span></div>` : ''}
+      <div class="row"><span>Em aberto</span><span>${c.aberto?fmt(c.aberto):'—'}</span></div>
+      <div class="row"><span>Já recebido</span><span>${c.recebido?fmt(c.recebido):'—'}</span></div>
+      <div class="row"><span>Situação</span><span>${situacao}</span></div>
+      ${tag}
+    </div>`;
+  }).join('') || `<div style="color:var(--text-soft);">Nenhum cliente lançado ainda — lance uma venda ou uma conta a receber.</div>`;
 }
 
 /* ---------- Lançamento em lote (planilha) ---------- */
@@ -819,7 +889,7 @@ window.removeGridRow = removeGridRow;
 function renderGrid(type){
   const cfg = GRID_CONFIG[type];
   const table = document.getElementById('grid-'+type);
-  table.querySelector('thead').innerHTML = '<tr>' + cfg.labels.map(l=>`<th>${l}</th>`).join('') + '<th></th></tr>';
+  table.querySelector('thead').innerHTML = '<tr>' + cfg.labels.map(l=>`<th>${esc(l)}</th>`).join('') + '<th></th></tr>';
   const tbody = document.createElement('tbody');
   gridRows[type].forEach(row=>{
     const tr = document.createElement('tr');
@@ -841,7 +911,11 @@ function renderGrid(type){
       tr.appendChild(td);
     });
     const tdBtn = document.createElement('td');
-    tdBtn.innerHTML = `<button class="icon-btn" onclick="removeGridRow('${type}','${row._id}')">✕</button>`;
+    const btn = document.createElement('button');
+    btn.className = 'icon-btn';
+    btn.textContent = '✕';
+    btn.addEventListener('click', ()=>removeGridRow(type, row._id));
+    tdBtn.appendChild(btn);
     tr.appendChild(tdBtn);
     tbody.appendChild(tr);
   });
