@@ -178,7 +178,7 @@
   </nav>
   <div class="sidebar-foot">
     <span><span class="conn-dot" id="conn-dot"></span><span id="conn-label">Conectando…</span></span><br>
-    Borderô financeiro
+    Borderô financeiro · <strong>build v7 (aba única)</strong>
   </div>
 </aside>
 
@@ -425,15 +425,18 @@ const STATUS_OPTS = {
   vendas:  ["Fechada","Em negociação","Perdida"]
 };
 
-async function sheetsList(name){
-  const url = `${SHEETDB_URL}?sheet=${SHEET_MAP[name]}`;
-  const res = await fetch(url);
-  if(!res.ok) throw new Error('Falha ao carregar ' + name + ' (HTTP ' + res.status + ')');
+/* Aba ÚNICA: lê tudo de uma vez e separa por coluna "tipo" (pagar/receber/vendas). */
+async function sheetsListAll(){
+  const res = await fetch(SHEETDB_URL);   // sem ?sheet= -> aba padrão (a única)
+  if(!res.ok) throw new Error('Falha ao carregar dados (HTTP ' + res.status + ')');
   const rows = await res.json();
   if(rows && rows.error) throw new Error(rows.error);
-  const opts = STATUS_OPTS[name] || [];
+  return rows.filter(r => Object.values(r).some(v => String(v).trim() !== ''));
+}
+function splitByTipo(rows, tipo){
+  const opts = STATUS_OPTS[tipo] || [];
   return rows
-    .filter(r => Object.values(r).some(v => String(v).trim() !== ''))  // descarta linhas totalmente vazias
+    .filter(r => normKey(r.tipo) === tipo)
     .map(r => ({ ...r,
       mes: canonMes(r.mes),
       status: canonStatus(r.status, opts),
@@ -441,17 +444,17 @@ async function sheetsList(name){
     }));
 }
 async function sheetsAdd(name, entry){
-  const res = await fetch(`${SHEETDB_URL}?sheet=${SHEET_MAP[name]}`, {
+  const res = await fetch(SHEETDB_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ data: { id:newId(), ...entry } })
+    body: JSON.stringify({ data: { id:newId(), tipo:name, ...entry } })
   });
   const out = await res.json();
   if(out && out.error) throw new Error(out.error);
   return out;
 }
 async function sheetsUpdate(name, id, patch){
-  const res = await fetch(`${SHEETDB_URL}/id/${encodeURIComponent(id)}?sheet=${SHEET_MAP[name]}`, {
+  const res = await fetch(`${SHEETDB_URL}/id/${encodeURIComponent(id)}`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ data: patch })
@@ -461,7 +464,7 @@ async function sheetsUpdate(name, id, patch){
   return out;
 }
 async function sheetsDelete(name, id){
-  const res = await fetch(`${SHEETDB_URL}/id/${encodeURIComponent(id)}?sheet=${SHEET_MAP[name]}`, {
+  const res = await fetch(`${SHEETDB_URL}/id/${encodeURIComponent(id)}`, {
     method: 'DELETE'
   });
   const out = await res.json();
@@ -495,9 +498,10 @@ async function loadAll(){
   const label = document.getElementById('conn-label');
   const dot = document.getElementById('conn-dot');
   try{
-    [pagarDocs, receberDocs, vendasDocs] = await Promise.all([
-      sheetsList('pagar'), sheetsList('receber'), sheetsList('vendas')
-    ]);
+    const todos = await sheetsListAll();
+    pagarDocs   = splitByTipo(todos, 'pagar');
+    receberDocs = splitByTipo(todos, 'receber');
+    vendasDocs  = splitByTipo(todos, 'vendas');
     sheetsOK = true;
     dot.className='conn-dot on'; label.textContent='Conectado à planilha';
     // Se o mês selecionado não tiver nenhum dado, pula pro mês mais recente que tiver.
@@ -514,7 +518,7 @@ async function loadAll(){
     sheetsOK = false;
     pagarDocs = []; receberDocs = []; vendasDocs = [];
     dot.className='conn-dot off'; label.textContent='Sem conexão com a planilha';
-    document.getElementById('notice-readonly').textContent = 'Não foi possível conectar à Planilha Google via SheetDB (' + e.message + '). Confira se as abas Pagar, Receber e Vendas existem na planilha conectada ao SheetDB.';
+    document.getElementById('notice-readonly').textContent = 'Não foi possível conectar à Planilha Google via SheetDB (' + e.message + '). Confira se a planilha conectada tem a coluna "tipo" (pagar/receber/vendas).';
     document.getElementById('notice-readonly').classList.add('show');
   }
 }
@@ -635,8 +639,15 @@ function statusSelect(collection, id, current, options){
 /* ---------- charts ---------- */
 let charts = {};
 function upsertChart(id, config){
-  if(charts[id]) charts[id].destroy();
-  charts[id] = new Chart(document.getElementById(id), config);
+  try{
+    const el = document.getElementById(id);
+    if(!el) return;                                  // canvas não existe: ignora
+    if(typeof Chart === 'undefined') return;         // biblioteca não carregou: ignora
+    if(charts[id]) charts[id].destroy();
+    charts[id] = new Chart(el, config);
+  }catch(e){
+    console.error('Falha ao desenhar o gráfico "' + id + '":', e);
+  }
 }
 
 /* ---------- render ---------- */
