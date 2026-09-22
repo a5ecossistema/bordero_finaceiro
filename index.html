@@ -371,105 +371,91 @@ const CATEGORIAS_PAGAR = ["Aluguel","Energia Elétrica","Água e Esgoto","Intern
 let mesAtual = "Setembro";
 let pagarDocs = [], receberDocs = [], vendasDocs = [];
 
-/* ---------- Armazenamento local (localStorage) ----------
-   Este arquivo é 100% estático (pensado para GitHub Pages): não depende de
-   nenhum backend. Os dados ficam salvos no navegador de cada pessoa que abre
-   a página — não são compartilhados automaticamente entre computadores. */
-const STORE_PREFIX = 'a5_painel_';
-let storageOK = true;
-
-const SEED = {
-  pagar: [
-    {categoria:"Aluguel", item:"Aluguel", resp:"Imobiliária", venc:"20", mes:"Setembro", valor:900, status:"Pendente"},
-    {categoria:"Energia Elétrica", item:"Energia Elétrica", resp:"Enel", venc:"22", mes:"Setembro", valor:243, status:"Pendente"},
-    {categoria:"Água e Esgoto", item:"Água e Esgoto", resp:"Cagece", venc:"10", mes:"Setembro", valor:150, status:"Pendente"},
-    {categoria:"Internet", item:"Internet", resp:"Provedor", venc:"15", mes:"Setembro", valor:100, status:"Pendente"},
-    {categoria:"Contabilidade", item:"Contabilidade", resp:"Escritório Contábil", venc:"20", mes:"Setembro", valor:280, status:"Pendente"},
-    {categoria:"Limpeza/Manutenção", item:"Limpeza/Manutenção", resp:"—", venc:"25", mes:"Setembro", valor:140, status:"Pago"},
-    {categoria:"Marketing Fixo", item:"Marketing Fixo", resp:"—", venc:"28", mes:"Setembro", valor:70, status:"Pendente"},
-    {categoria:"Folha de Pagamento", item:"Folha de pagamento", resp:"Igor", venc:"10", mes:"Setembro", valor:1000, status:"Pago"},
-    {categoria:"Folha de Pagamento", item:"Folha de pagamento", resp:"Igor", venc:"15", mes:"Setembro", valor:500, status:"Pago"},
-    {categoria:"Folha de Pagamento", item:"Folha de pagamento", resp:"Fernando", venc:"5", mes:"Setembro", valor:1000, status:"Pago"},
-    {categoria:"Folha de Pagamento", item:"Folha de pagamento", resp:"Hiarley", venc:"10", mes:"Setembro", valor:500, status:"Pendente"},
-    {categoria:"Folha de Pagamento", item:"Folha de pagamento", resp:"Wallison", venc:"20", mes:"Setembro", valor:500, status:"Pago"},
-    {categoria:"Folha de Pagamento", item:"Folha de pagamento", resp:"Caio", venc:"—", mes:"Setembro", valor:500, status:"Pendente"},
-    {categoria:"Folha de Pagamento", item:"Folha de pagamento", resp:"Emanuel", venc:"—", mes:"Setembro", valor:2000, status:"Pendente"},
-    {categoria:"Ferramentas/Tokens IA", item:"Open AI (tokens)", resp:"—", venc:"—", mes:"Setembro", valor:52, status:"Pago"},
-    {categoria:"Equipamentos", item:"Cartão", resp:"Equipamentos", venc:"—", mes:"Setembro", valor:1500, status:"Pendente"},
-    {categoria:"Equipamentos", item:"Notebook", resp:"Equipamentos", venc:"—", mes:"Setembro", valor:450, status:"Pago"},
-    {categoria:"Outros", item:"VR", resp:"Time", venc:"—", mes:"Setembro", valor:300, status:"Pendente"},
-    {categoria:"Financiamento", item:"Parcela do financiamento", resp:"Itaú", venc:"—", mes:"Setembro", valor:1500, status:"Pago"},
-    {categoria:"Financiamento", item:"Parcela do financiamento", resp:"Itaú", venc:"—", mes:"Setembro", valor:1000, status:"Pendente"},
-    {categoria:"Outros", item:"Valor caixa Itaú", resp:"—", venc:"—", mes:"Setembro", valor:3000, status:"Pendente"},
-  ],
-  receber: [
-    {cliente:"Performance Run", venc:"10/09/2026", mes:"Setembro", valor:3000, status:"Atrasado", obs:""},
-    {cliente:"FabiFisio", venc:"—", mes:"Setembro", valor:0, status:"Pendente", obs:""},
-    {cliente:"Clínica Adil", venc:"—", mes:"Setembro", valor:0, status:"Pendente", obs:""},
-    {cliente:"LR Auto Store", venc:"15/09/2026", mes:"Setembro", valor:3000, status:"Pendente", obs:""},
-    {cliente:"Premium Film", venc:"26/09/2026", mes:"Setembro", valor:1700, status:"Pendente", obs:""},
-    {cliente:"China Source", venc:"05/09/2026", mes:"Setembro", valor:3000, status:"Atrasado", obs:""},
-    {cliente:"Dr. Marcos", venc:"—", mes:"Setembro", valor:0, status:"Pendente", obs:""},
-    {cliente:"Paris Dakar", venc:"—", mes:"Setembro", valor:0, status:"Pago", obs:""},
-    {cliente:"CF do Brasil", venc:"19/09/2026", mes:"Setembro", valor:500, status:"Pendente", obs:""},
-    {cliente:"Aomed", venc:"—", mes:"Setembro", valor:0, status:"Pago", obs:""},
-    {cliente:"Quadros & Sbruzzi", venc:"—", mes:"Setembro", valor:500, status:"Pendente", obs:""},
-    {cliente:"Rio Piscinas", venc:"10/09/2026", mes:"Setembro", valor:1000, status:"Atrasado", obs:""},
-    {cliente:"Arilo Neto", venc:"—", mes:"Setembro", valor:0, status:"Pendente", obs:""},
-    {cliente:"Douglas Santos", venc:"—", mes:"Setembro", valor:0, status:"Pago", obs:""},
-    {cliente:"Rio Piscinas (%)", venc:"—", mes:"Setembro", valor:1000, status:"Pendente", obs:"Percentual/comissão"},
-    {cliente:"Jamila", venc:"—", mes:"Setembro", valor:2960, status:"Atrasado", obs:""},
-  ],
-  vendas: []
-};
+/* ---------- Conexão com a Planilha do Google (via SheetDB) ----------
+   Este painel lê e grava direto numa Planilha Google compartilhada, através
+   da API do SheetDB (https://sheetdb.io). O SheetDB já lida com CORS
+   automaticamente, então não precisa de nenhum Apps Script. */
+const SHEETDB_URL = "https://sheetdb.io/api/v1/bn2a3fob1bw09";
+const SHEET_MAP = { pagar: "Pagar", receber: "Receber", vendas: "Vendas" };
+let sheetsOK = false;
 
 function newId(){ return 'id' + Date.now() + Math.random().toString(16).slice(2); }
 
-function loadCollection(name){
-  try{
-    const raw = localStorage.getItem(STORE_PREFIX + name);
-    if(raw){ return JSON.parse(raw); }
-    const seeded = SEED[name].map(r => ({ id:newId(), ...r }));
-    localStorage.setItem(STORE_PREFIX + name, JSON.stringify(seeded));
-    return seeded;
-  }catch(e){
-    storageOK = false;
-    return SEED[name].map(r => ({ id:newId(), ...r }));
-  }
+async function sheetsList(name){
+  const url = `${SHEETDB_URL}?sheet=${SHEET_MAP[name]}`;
+  const res = await fetch(url);
+  if(!res.ok) throw new Error('Falha ao carregar ' + name + ' (HTTP ' + res.status + ')');
+  const rows = await res.json();
+  if(rows && rows.error) throw new Error(rows.error);
+  return rows.map(r => ({ ...r, valor: parseFloat(r.valor) || 0 }));
 }
-function saveCollection(name, arr){
-  try{ localStorage.setItem(STORE_PREFIX + name, JSON.stringify(arr)); }
-  catch(e){ storageOK = false; }
+async function sheetsAdd(name, entry){
+  const res = await fetch(`${SHEETDB_URL}?sheet=${SHEET_MAP[name]}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ data: { id:newId(), ...entry } })
+  });
+  const out = await res.json();
+  if(out && out.error) throw new Error(out.error);
+  return out;
 }
-function addDocLocal(name, entry){
-  const arr = name==='pagar'?pagarDocs : name==='receber'?receberDocs : vendasDocs;
-  arr.push({ id:newId(), ...entry });
-  saveCollection(name, arr);
-  renderAll();
+async function sheetsUpdate(name, id, patch){
+  const res = await fetch(`${SHEETDB_URL}/id/${encodeURIComponent(id)}?sheet=${SHEET_MAP[name]}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ data: patch })
+  });
+  const out = await res.json();
+  if(out && out.error) throw new Error(out.error);
+  return out;
 }
-function updateDocLocal(name, id, patch){
-  const arr = name==='pagar'?pagarDocs : name==='receber'?receberDocs : vendasDocs;
-  const row = arr.find(r=>r.id===id);
-  if(row) Object.assign(row, patch);
-  saveCollection(name, arr);
-  renderAll();
-}
-function removeDocLocal(name, id){
-  let arr = name==='pagar'?pagarDocs : name==='receber'?receberDocs : vendasDocs;
-  arr = arr.filter(r=>r.id!==id);
-  if(name==='pagar') pagarDocs = arr; else if(name==='receber') receberDocs = arr; else vendasDocs = arr;
-  saveCollection(name, arr);
-  renderAll();
+async function sheetsDelete(name, id){
+  const res = await fetch(`${SHEETDB_URL}/id/${encodeURIComponent(id)}?sheet=${SHEET_MAP[name]}`, {
+    method: 'DELETE'
+  });
+  const out = await res.json();
+  if(out && out.error) throw new Error(out.error);
+  return out;
 }
 
-function loadAll(){
-  pagarDocs = loadCollection('pagar');
-  receberDocs = loadCollection('receber');
-  vendasDocs = loadCollection('vendas');
+async function addDocLocal(name, entry){
+  try{
+    await sheetsAdd(name, entry);
+    await loadAll();
+    renderAll();
+  }catch(e){ alert('Não foi possível salvar na planilha: ' + e.message); }
+}
+async function updateDocLocal(name, id, patch){
+  try{
+    await sheetsUpdate(name, id, patch);
+    await loadAll();
+    renderAll();
+  }catch(e){ alert('Não foi possível atualizar a planilha: ' + e.message); }
+}
+async function removeDocLocal(name, id){
+  try{
+    await sheetsDelete(name, id);
+    await loadAll();
+    renderAll();
+  }catch(e){ alert('Não foi possível excluir na planilha: ' + e.message); }
+}
+
+async function loadAll(){
   const label = document.getElementById('conn-label');
   const dot = document.getElementById('conn-dot');
-  if(storageOK){ dot.className='conn-dot on'; label.textContent='Dados salvos neste navegador'; }
-  else { dot.className='conn-dot off'; label.textContent='Armazenamento indisponível'; }
+  try{
+    [pagarDocs, receberDocs, vendasDocs] = await Promise.all([
+      sheetsList('pagar'), sheetsList('receber'), sheetsList('vendas')
+    ]);
+    sheetsOK = true;
+    dot.className='conn-dot on'; label.textContent='Conectado à planilha';
+  }catch(e){
+    sheetsOK = false;
+    pagarDocs = []; receberDocs = []; vendasDocs = [];
+    dot.className='conn-dot off'; label.textContent='Sem conexão com a planilha';
+    document.getElementById('notice-readonly').textContent = 'Não foi possível conectar à Planilha Google via SheetDB (' + e.message + '). Confira se as abas Pagar, Receber e Vendas existem na planilha conectada ao SheetDB.';
+    document.getElementById('notice-readonly').classList.add('show');
+  }
 }
 
 const fmt = n => (n||0).toLocaleString('pt-BR', {style:'currency', currency:'BRL'});
@@ -794,18 +780,19 @@ async function saveGrid(type){
   const cfg = GRID_CONFIG[type];
   const valid = gridRows[type].filter(cfg.required);
   if(!valid.length){ alert('Preencha ao menos uma linha completa antes de salvar.'); return; }
-  valid.forEach(r=>{
-    const entry = {};
-    cfg.fields.forEach(f=>{ entry[f.key] = f.type==='number' ? (r[f.key]||0) : (r[f.key]||''); });
-    const arr = type==='pagar'?pagarDocs : type==='receber'?receberDocs : vendasDocs;
-    arr.push({ id:newId(), ...entry });
-  });
-  saveCollection(type, type==='pagar'?pagarDocs : type==='receber'?receberDocs : vendasDocs);
-  gridRows[type] = gridRows[type].filter(r=>!cfg.required(r));
-  if(!gridRows[type].length){ for(let i=0;i<3;i++) gridRows[type].push(blankRow(type)); }
-  renderGrid(type);
-  renderAll();
-  alert(valid.length + ' lançamento(s) salvo(s) com sucesso.');
+  try{
+    await Promise.all(valid.map(r=>{
+      const entry = {};
+      cfg.fields.forEach(f=>{ entry[f.key] = f.type==='number' ? (r[f.key]||0) : (r[f.key]||''); });
+      return sheetsAdd(type, entry);
+    }));
+    await loadAll();
+    gridRows[type] = gridRows[type].filter(r=>!cfg.required(r));
+    if(!gridRows[type].length){ for(let i=0;i<3;i++) gridRows[type].push(blankRow(type)); }
+    renderGrid(type);
+    renderAll();
+    alert(valid.length + ' lançamento(s) salvo(s) na planilha com sucesso.');
+  }catch(e){ alert('Não foi possível salvar na planilha: ' + e.message); }
 }
 window.saveGrid = saveGrid;
 
@@ -814,8 +801,7 @@ window.saveGrid = saveGrid;
   renderGrid(type);
 });
 
-loadAll();
-renderAll();
+loadAll().then(renderAll);
 </script>
 </body>
 </html>
